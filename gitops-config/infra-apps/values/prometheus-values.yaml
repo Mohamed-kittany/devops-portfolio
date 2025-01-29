@@ -1,0 +1,27 @@
+prometheus:
+  prometheusSpec:
+    additionalScrapeConfigs:
+      - job_name: todo-app
+        honor_labels: true
+        scrape_interval: 30s  # Adjusted scrape interval to match ServiceMonitor
+        scrape_timeout: 10s  # Adjusted scrape timeout to match ServiceMonitor
+        metrics_path: /api/metrics  # Updated path to scrape metrics
+        scheme: http  # Keep HTTP unless HTTPS is required
+        static_configs:
+          - targets:
+              - todoapp.ddns.net
+
+grafana:
+  enabled: true
+  persistence:
+    enabled: true
+    type: sts
+    storageClassName: "gp2-mongo"
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+    finalizers:
+      - kubernetes.io/pvc-protection
+
+crds:
+  enabled: true

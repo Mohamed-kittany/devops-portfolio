@@ -1,0 +1,236 @@
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        timestamps()
+    }
+
+    environment {
+        // TODO: Add env variables across all stages
+        ECR_BACKEND_REPO = '600627353694.dkr.ecr.ap-south-1.amazonaws.com/mohamed/todoapp/backend'
+        ECR_FRONTEND_REPO = '600627353694.dkr.ecr.ap-south-1.amazonaws.com/mohamed/todoapp/frontend'
+        REGION = 'ap-south-1'
+    }
+
+    stages {
+        stage('Checkout 📥') {
+            steps {
+                echo '📥 Cloning repository...'
+                checkout scm
+                sh 'git fetch --tags'
+            }
+        }
+
+        stage('Unit Tests 🧪') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch pattern: "feature/.*", comparator: "REGEXP"
+                }
+            }
+            steps {
+                // TODO: parallel
+                echo '🧪 Running unit tests...'
+                // Backend tests
+                sh 'docker build -f backend/Dockerfile.test -t backend-tests backend/'
+                sh 'docker run --rm backend-tests'
+
+                // Frontend tests
+                sh 'docker build -f frontend/Dockerfile.test -t react-tests frontend/'
+                sh 'docker run --rm react-tests'
+            }
+        }
+
+        stage('Build 🔨') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch pattern: "feature/.*", comparator: "REGEXP"
+                }
+            }
+            steps {
+                script {
+                    // TODO: parallel
+                    echo '🔨 Building Docker images...'
+                    build('frontend')
+                    build('backend')
+                }
+            }
+        }
+
+        stage('End-to-End Testing 🔍') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch pattern: "feature/.*", comparator: "REGEXP"
+                }
+            }
+            steps {
+                script {
+                    echo '🔍 Starting application services for E2E tests...'
+                    withCredentials([
+                        string(credentialsId: 'TODOAPP-MONGO_INITDB_ROOT_USERNAME', variable: 'MONGO_INITDB_ROOT_USERNAME'),
+                        string(credentialsId: 'TODOAPP-MONGO_INITDB_ROOT_PASSWORD', variable: 'MONGO_INITDB_ROOT_PASSWORD'),
+                        string(credentialsId: 'TODOAPP-MONGO-URI', variable: 'MONGO_URI')
+                    ]) {
+                        sh 'docker compose up -d'
+
+                        // Wait for the todo-db container to be healthy
+                        echo '🔍 Waiting for the todo-db container to be healthy...'
+                        waitUntil {
+                            script {
+                                def healthStatus = sh(
+                                    script: "docker inspect -f '{{.State.Health.Status}}' todo-db",
+                                    returnStdout: true
+                                ).trim()
+                                if (healthStatus != 'healthy') {
+                                    echo "Current status of todo-db: ${healthStatus}. Retrying..."
+                                    return false
+                                }
+                                echo "todo-db is healthy!"
+                                return true
+                            }
+                        }
+
+                        // Sleep for 10 seconds after health check
+                        echo '🕒 Adding a 10-second delay...'
+                        sleep 10
+
+                        // Build the E2E test container
+                        echo '🔍 Building E2E test container...'
+                        sh 'docker build -f e2e/Dockerfile.e2e -t e2e-tests e2e/'
+  
+                        // Run the E2E tests
+                        echo '🔍 Running E2E tests...'
+                        def sanitizedBranchName = env.BRANCH_NAME.replaceAll('/', '_')
+                        def networkName = (env.BRANCH_NAME == 'main') ? 'portfolio-mbp_main_frontend' : "portfolio-mbp_${sanitizedBranchName}_frontend"
+
+                        sh "docker run --rm --network=${networkName} e2e-tests"
+
+                    // sh 'docker run --rm --network=application_frontend e2e-tests' // Run Locally
+                    }
+                }
+            }
+        }
+
+        stage('Tag 🏷️') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo '🏷️ Tagging the build...'
+                    def latestTag = sh(script: 'git describe --tags --abbrev=0', returnStdout: true).trim()
+                    def newTag = incrementVersion(latestTag)
+                    env.NEW_TAG = newTag
+                    echo "Latest tag: ${latestTag}, New tag: ${newTag}"
+                }
+            }
+        }
+
+        stage('Publish 📦') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    // TODO: parallel
+                    echo '🚀 Publishing Docker images to ECR...'
+                    publishImage('frontend', "${ECR_FRONTEND_REPO}", env.NEW_TAG)
+                    publishImage('backend', "${ECR_BACKEND_REPO}", env.NEW_TAG)
+                }
+            }
+        }
+
+        stage('Deploy 🌐') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo '🚀 Deploying updated images to GitOps repo...'
+                    deployAllWithVersion([
+                        'frontend': "${ECR_FRONTEND_REPO}",
+                        'backend': "${ECR_BACKEND_REPO}"
+                    ], env.NEW_TAG)
+                }
+            }
+        }
+
+        stage('Push Tag 📌') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    sh """
+                        git config user.name "mohamed-jenkins"
+                        git config user.email "mohamed@develeap.com"
+
+                        git tag -a '${env.NEW_TAG}' -m 'Release version ${env.NEW_TAG}'
+                        git push --tags
+                    """
+                    echo "✅ Tag ${env.NEW_TAG} created and pushed successfully."
+                }
+            }
+        }
+    }
+    post {
+        always {
+            // TODO: Add report (Send email)
+            echo '🧹 Cleaning up workspace...'
+            sh 'docker compose down -v || true'
+            sh 'docker image prune -f'
+            // sh 'docker images --filter "reference=600627353694.dkr.ecr.ap-south-1.amazonaws.com/mohamed/todoapp/*" -q | xargs -r docker rmi -f || true'
+            // sh 'docker compose down'
+            cleanWs()
+        }
+        success {
+            echo '✅ Pipeline completed successfully!'
+        }
+        failure {
+            echo '❌ Pipeline failed!'
+        }
+    }
+}
+
+def incrementVersion(version) {
+    def parts = version.tokenize('.')
+    def patch = parts[-1].toInteger() + 1
+    parts[-1] = patch.toString()
+    return parts.join('.')
+}
+
+def build(component) {
+    echo "🔨 Building Docker image for ${component}..."
+    sh "docker build -t ${component} -f ${component}/Dockerfile ${component}"
+}
+
+def publishImage(component, repo, tag) {
+    def imageTag = "${repo}:${tag}"
+    echo "📤 Publishing Docker image for ${component}..."
+    sh """
+        docker tag ${component} ${imageTag}
+        aws ecr get-login-password --region ${env.REGION} | docker login --username AWS --password-stdin ${repo}
+        docker push ${imageTag}
+    """
+}
+
+def deployAllWithVersion(components, tag) {
+    def gitOpsRepo = 'git@gitlab.com:bootcamp3554848/portfolio/gitops-config.git'
+
+    echo '📂 Cloning GitOps repository...'
+    sh "git clone ${gitOpsRepo}"
+    components.each { component, repo ->
+        echo "🔄 Updating ${component}ImageVersion in values.yaml..."
+        sh "sed -i \"s|${component}ImageVersion:.*|${component}ImageVersion: ${tag}|\" gitops-config/infra-apps/todo-app/values.yaml"
+    }
+    sh """
+        cd gitops-config
+        git config user.name "mohamed-jenkins"
+        git config user.email "mohamed@develeap.com"
+        git commit -am \"Update frontend and backend image versions to ${tag}\"
+        git push
+    """
+}

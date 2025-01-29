@@ -1,0 +1,38 @@
+# # Backend ServiceMonitor
+# apiVersion: monitoring.coreos.com/v1
+# kind: ServiceMonitor
+# metadata:
+#   name: todo-app-backend-monitor
+#   namespace: todo-app
+# spec:
+#   selector:
+#     matchLabels:
+#       app: todo-app-backend  # Targets the backend service
+#   namespaceSelector:
+#     matchNames:
+#       - todo-app
+#   endpoints:
+#     - port: http
+#       path: /metrics
+#       interval: 30s
+#       scrapeTimeout: 10s
+# ---
+# Frontend ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: todo-app-frontend-monitor
+  namespace: todo-app
+spec:
+  selector:
+    matchLabels:
+      app: todo-app-frontend-service
+  namespaceSelector:
+    matchNames:
+      - todo-app
+  endpoints:
+    - port: http
+      path: /api/metrics
+      interval: 30s
+      scrapeTimeout: 10s
+

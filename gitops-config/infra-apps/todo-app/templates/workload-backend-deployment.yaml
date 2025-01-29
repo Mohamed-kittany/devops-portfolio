@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.backendLabel }}-deployment
+  labels:
+    app: {{ .Values.backendLabel }}
+spec:
+  replicas: {{ .Values.backendReplicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.backendLabel }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.backendLabel }}
+    spec:
+      containers:
+      - name: {{ .Values.backendLabel }}-container
+        image: "{{ .Values.backendImageName }}:{{ .Values.backendImageVersion }}"
+        ports:
+        - containerPort: {{ .Values.backendContainerPort }}
+        envFrom:
+        - secretRef:
+            name: {{ .Values.mongoDBAuthSecret.name }}
+        # - configMapRef:
+        #     name: {{ .Values.configMap.name }}
+        env:
+          - name: MONGO_URI
+            value: "mongodb://$(USER):$(PASSWORD)@{{ .Chart.Name }}-mongodb-headless:27017/{{ .Values.databaseName }}?replicaSet=rs0"
+            # value: "mongodb://mohamed:hellofromfuture@todo-app-mongodb-headless:27017/todo?replicaSet=rs0&authSource=todo"
+        resources:
+          requests:
+            cpu: {{ .Values.resources.requests.cpu }}
+            memory: {{ .Values.resources.requests.memory }}
+          limits:
+            cpu: {{ .Values.resources.limits.cpu }}
+            memory: {{ .Values.resources.limits.memory }}

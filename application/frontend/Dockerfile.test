@@ -1,0 +1,14 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files first to install dependencies (optimizes caching)
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+COPY src/ /app/src/
+
+# Run tests
+CMD ["npm", "test", "--", "--watchAll=false"]

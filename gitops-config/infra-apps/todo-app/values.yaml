@@ -1,0 +1,101 @@
+###################################################
+# Deployments (APP)
+appName: todo-app
+
+frontendLabel: todo-app-frontend
+frontendReplicaCount: 2
+
+backendLabel: todo-app-backend
+backendReplicaCount: 2
+
+
+
+frontendImageName: 600627353694.dkr.ecr.ap-south-1.amazonaws.com/mohamed/todoapp/frontend
+frontendImageVersion: 1.0.11
+frontendContainerPort: 80
+
+backendImageName: 600627353694.dkr.ecr.ap-south-1.amazonaws.com/mohamed/todoapp/backend
+backendImageVersion: 1.0.11
+backendContainerPort: 5000
+
+resources:
+  requests:
+    memory: "256Mi" # Reduced from 512Mi
+    cpu: "250m"     # Reduced from 500m
+  limits:
+    memory: "512Mi" # Reduced from 1Gi
+    cpu: "500m"     # Reduced from 1
+
+###################################################
+# Services
+frontendService:
+  name: todo-app-frontend-service
+  ports:
+    port: 80
+    targetPort: 80
+
+backendSerivce:
+  name: todo-app-backend-service
+  ports:
+    port: 5000
+    targetPort: 5000
+
+###################################################
+# Ingress 
+ingress:
+  name: todo-app-ingress
+  clusterIssuerName: letsencrypt-prod
+  tls:
+    host: todoapp.ddns.net
+    secretName: todo-app-tls
+  rules:
+    host: todoapp.ddns.net
+    frontendServiceName: todo-app-frontend-service
+    frontendServicePort: 80
+    backendServiceName: todo-app-backend-service
+    backendServicePort: 5000
+
+###################################################
+# Configmaps 
+configMap:
+  name: todo-app-conf
+
+
+# Secrets
+mongoSecret:
+  name: mongodb-credentials
+
+mongoDBAuthSecret:
+  name: mongodb-uri
+###################################################
+# clusterIssuer
+clusterIssuer:
+  name: letsencrypt-prod
+  server: https://acme-v02.api.letsencrypt.org/directory
+  email: kittanyenterprise@gmail.com
+  privateKeySecretName: letsencrypt-prod
+
+###################################################
+# MONGODB CONFIGURATIONS:
+mongodb: 
+  architecture: replicaset
+  replicaCount: 3
+  auth:
+    enabled: true
+    existingSecret: mongodb-credentials
+    usernames: ["mohamed"]        
+    databases: ["todo"]     
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: gp2-mongo
+    # storageClass: standard
+  resources:
+    requests:
+      memory: "256Mi" # Reduced from 512Mi
+      cpu: "250m"     # Reduced from 500m
+    limits:
+      memory: "512Mi" # Reduced from 1Gi
+      cpu: "500m"     # Reduced from 1
+
+databaseName: todo
